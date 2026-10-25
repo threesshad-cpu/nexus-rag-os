@@ -67,18 +67,53 @@ def chunk_text(text: str, size: int = 1200, overlap: int = 180):
         start = max(end - overlap, start + 1)
     return result
 
+def gemini_extract_multimodal(raw: bytes, filename: str, mime_type: str = "application/pdf") -> str:
+    """Extract text, tables, numbers, grades, marks, and content from scanned PDFs or images using Gemini Vision."""
+    client = get_genai_client()
+    if not client:
+        return ""
+    try:
+        def _extract():
+            resp = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=[
+                    types.Part.from_bytes(data=raw, mime_type=mime_type),
+                    f"Transcribe and extract ALL text, tables, columns, grades, marks, subjects, GPA, numbers, and data from this document ({filename}) accurately and completely. Output clean, readable Markdown."
+                ]
+            )
+            return getattr(resp, "text", "") or ""
+        return execute_with_retry(_extract, max_retries=1, base_delay=1.0, operation_name="gemini_multimodal_ocr")
+    except Exception:
+        return ""
+
 def split_uploaded_file(name: str, raw: bytes):
     ext = Path(name).suffix.lower()
     if ext == ".pdf":
+        pages = []
         try:
             reader = PdfReader(io.BytesIO(raw))
-            pages = []
             for i, page in enumerate(reader.pages, 1):
                 extracted = page.extract_text() or ""
-                pages.append({"page": i, "text": normalize_text(extracted)})
-            return pages if pages else [{"page": 1, "text": ""}]
-        except Exception as e:
-            return [{"page": 1, "text": f"[Corrupt or unreadable PDF: {Path(name).name}]"}]
+                if extracted.strip():
+                    pages.append({"page": i, "text": normalize_text(extracted)})
+        except Exception:
+            pass
+
+        # If digital text extraction yielded no usable content (e.g. scanned marksheet, images, non-standard fonts),
+        # use Gemini multimodal vision OCR to transcribe the document
+        total_text_len = sum(len(p.get("text", "")) for p in pages)
+        if total_text_len < 30:
+            ocr_text = gemini_extract_multimodal(raw, name, mime_type="application/pdf")
+            if ocr_text.strip():
+                return [{"page": 1, "text": normalize_text(ocr_text)}]
+
+        return pages if pages else [{"page": 1, "text": f"Uploaded document: {Path(name).name}"}]
+
+    elif ext in {".png", ".jpg", ".jpeg", ".webp"}:
+        mime = f"image/{ext.replace('.', '')}" if ext != ".jpg" else "image/jpeg"
+        ocr_text = gemini_extract_multimodal(raw, name, mime_type=mime)
+        return [{"page": 1, "text": normalize_text(ocr_text) if ocr_text else f"Uploaded image: {Path(name).name}"}]
+
     text = raw.decode("utf-8", errors="ignore")
     return [{"page": 1, "text": normalize_text(text)}]
 
@@ -86,7 +121,14 @@ def make_chunks(name: str, raw: bytes, source_type: str, size=1200, overlap=180)
     doc_id = hashlib.sha256(raw).hexdigest()[:16]
     chunks = []
     for page in split_uploaded_file(name, raw):
-        for start, end, text in chunk_text(page["text"], size=size, overlap=overlap):
+        page_text = page.get("text", "").strip()
+        if not page_text:
+            continue
+        page_chunks = chunk_text(page_text, size=size, overlap=overlap)
+        # If chunk_text returned empty but text exists, ensure at least one chunk is created
+        if not page_chunks and page_text:
+            page_chunks = [(0, len(page_text), page_text)]
+        for start, end, text in page_chunks:
             chunk_id = hashlib.sha1(
                 f"{doc_id}:{page['page']}:{start}:{text[:120]}".encode()
             ).hexdigest()[:16]
