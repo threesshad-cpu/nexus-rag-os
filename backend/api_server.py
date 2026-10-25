@@ -100,6 +100,17 @@ def _enforce_chat_rate_limit(request: Request) -> None:
 class ChatRequest(BaseModel):
     query: str
 
+@app.get("/")
+def root():
+    return {
+        "status": "online",
+        "service": "NEXUS RAG OS API",
+        "version": "3.0.0",
+        "docs": "/docs",
+        "health": "/healthz",
+        "frontend": "https://nexus-rag-os-ui.onrender.com"
+    }
+
 @app.get("/healthz")
 def healthz():
     return {"status":"ok","service":"nexus-api","version":"3.0.0"}
