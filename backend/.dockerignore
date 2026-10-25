@@ -1,0 +1,20 @@
+# Credentials and local state must never enter the Docker build context.
+.env
+.env.*
+!.env.example
+nexus_db.json
+nexus_state.db
+nexus_state.db-*
+*.db
+*.db-wal
+*.db-shm
+*.tmp
+# Local development and test artifacts
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+tests/
+reports/
+logs/

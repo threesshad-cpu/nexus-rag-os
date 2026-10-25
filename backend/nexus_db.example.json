@@ -1,0 +1,40 @@
+{
+  "projects": [
+    [
+      "Agri-Neural Twin",
+      "React · Gemini · Agentic AI",
+      "Climate-resilient farming intelligence",
+      "Portfolio"
+    ],
+    [
+      "OptiFlow Digital Twin",
+      "React · Three.js · Node.js",
+      "Factory digital twin + AGV orchestration",
+      "Portfolio"
+    ],
+    [
+      "NEXUS RAG OS",
+      "LangGraph · MCP · Pinecone · Qdrant",
+      "Grounded multi-agent knowledge OS",
+      "Current"
+    ]
+  ],
+  "workflows": [
+    [
+      "Research Brief",
+      "Retrieve → compare → verify → synthesize",
+      "4 nodes"
+    ],
+    [
+      "Code Review",
+      "Index repo → inspect → detect risk → explain",
+      "5 nodes"
+    ]
+  ],
+  "settings": {
+    "dark": true,
+    "model": "Gemini 2.5 Flash",
+    "temp": 15,
+    "fed": true
+  }
+}

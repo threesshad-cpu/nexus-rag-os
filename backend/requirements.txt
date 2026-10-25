@@ -1,0 +1,11 @@
+fastapi>=0.115
+uvicorn[standard]>=0.34
+python-multipart>=0.0.20
+google-genai>=1.30
+numpy>=1.26
+pypdf>=5.0
+langgraph>=0.6
+mcp>=2.0
+pinecone>=7.0
+qdrant-client>=1.15
+python-dotenv>=1.0

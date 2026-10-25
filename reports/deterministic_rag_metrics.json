@@ -1,0 +1,11 @@
+{
+  "dataset_total": 30,
+  "retrieval_queries": 22,
+  "recall_at_5": 0.955,
+  "precision_at_5": 0.191,
+  "mrr": 0.725,
+  "intent_accuracy_pct": 100.0,
+  "phantom_citations_rejected": true,
+  "abstention_cases": 8,
+  "status": "PASS"
+}

@@ -1,0 +1,6 @@
+{
+  "query": "cgpa and list the project by weightage",
+  "intent": "qa",
+  "retrieved": [
+    {
+      "chunk": 

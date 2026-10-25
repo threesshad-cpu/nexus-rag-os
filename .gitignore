@@ -1,0 +1,42 @@
+# Python environments and caches
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+backend/.env
+backend/.env.*
+!backend/.env.example
+frontend/.env
+frontend/.env.*
+!frontend/.env.example
+
+# Node build artifacts and dependencies
+node_modules/
+frontend/node_modules/
+frontend/dist/
+.DS_Store
+
+# Local databases and state
+backend/nexus_db.json
+backend/nexus_state.db
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.tmp
+
+# Local logs, reports and tool state
+*.log
+scratch/
+.vercel/
