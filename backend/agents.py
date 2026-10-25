@@ -310,18 +310,73 @@ def synthesize_grounded_answer(query: str, retrieved: list[dict], intent: str = 
     out.append("\n> Synthesized and validated against indexed documents with verifiable citations.")
     return "\n".join(out)
 
+def fetch_web_evidence(query: str) -> str:
+    """Fetch live web evidence via Wikipedia and DuckDuckGo to augment LLM reasoning for any question."""
+    import urllib.request
+    import urllib.parse
+    cleaned = re.sub(r"[^a-zA-Z0-9\s]", " ", query).strip()
+    words = [w for w in cleaned.split() if len(w) > 2 and w.lower() not in {"what", "which", "where", "explain", "describe", "tell", "about", "compare", "versus", "with", "how", "does", "the", "and"}]
+    search_term = " ".join(words[:5]) or cleaned
+    if not search_term:
+        return ""
+
+    snippets = []
+    # 1. Wikipedia Summary API
+    try:
+        wiki_url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{urllib.parse.quote(search_term)}"
+        req = urllib.request.Request(wiki_url, headers={"User-Agent": "NexusRagOS/3.0"})
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode())
+            if data.get("extract"):
+                title = data.get("title", search_term)
+                snippets.append(f"Wikipedia ({title}): {data['extract']}")
+    except Exception:
+        pass
+
+    # 2. DuckDuckGo Instant Answer API
+    try:
+        ddg_url = f"https://api.duckduckgo.com/?q={urllib.parse.quote(search_term)}&format=json&no_html=1&skip_disambig=1"
+        req = urllib.request.Request(ddg_url, headers={"User-Agent": "NexusRagOS/3.0"})
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode())
+            abstract = data.get("AbstractText") or data.get("Abstract")
+            if abstract and abstract not in " ".join(snippets):
+                snippets.append(f"Web Search Summary: {abstract}")
+            elif data.get("RelatedTopics"):
+                for t in data["RelatedTopics"][:2]:
+                    if isinstance(t, dict) and t.get("Text"):
+                        snippets.append(f"Web Fact: {t['Text']}")
+    except Exception:
+        pass
+
+    return "\n\n".join(snippets[:3])
+
 def evidence_agent(state: AgentState) -> AgentState:
     if state.get("error"):
         return {"trace": state.get("trace", []) + [{"agent": "Evidence Agent", "status": "skipped", "reason": "upstream_error"}]}
     blocks = []
-    for i, r in enumerate(state.get("retrieved", []), 1):
+    retrieved = state.get("retrieved", [])
+    for i, r in enumerate(retrieved, 1):
         c = r["chunk"]
         blocks.append(f"[S{i}] {c.doc_name} p.{c.page}\n{c.text}")
+
+    # If internal chunks are few or have low semantic relevance, augment with live web intelligence
+    top_score = max((r.get("hybrid_score", r.get("score", 0.0)) for r in retrieved), default=0.0)
+    web_snippet = ""
+    if len(retrieved) < 3 or top_score < 0.30:
+        try:
+            web_snippet = fetch_web_evidence(state["query"])
+        except Exception:
+            web_snippet = ""
+
+    if web_snippet:
+        blocks.append(f"[Web Intelligence]\n{web_snippet}")
+
     evidence = "\n\n".join(blocks)
     critique_prompt = f"""
-You are the Evidence Agent in a multi-agent RAG system.
-Review the retrieved evidence for the user's query.
-Do not invent facts. Flag missing evidence, contradictions, or weak support.
+You are the Evidence Agent in a universal RAG system.
+Review the retrieved internal evidence and web intelligence for the user's query.
+Identify verified document facts, web findings, and any gaps.
 Return a concise evidence verdict.
 
 USER QUERY:
@@ -332,10 +387,9 @@ EVIDENCE:
 """
     try:
         critique = call_llm(critique_prompt, 0.0)
-        trace = state.get("trace", []) + [{"agent": "Evidence Agent", "status": "completed", "sources": len(blocks)}]
+        trace = state.get("trace", []) + [{"agent": "Evidence Agent", "status": "completed", "sources": len(blocks), "web_search": bool(web_snippet)}]
         return {"evidence": evidence, "critique": critique, "trace": trace}
     except LLMExecutionError:
-        retrieved = state.get("retrieved", [])
         if retrieved:
             docs = list(dict.fromkeys(r["chunk"].doc_name for r in retrieved))
             critique = f"Verified {len(retrieved)} chunk(s) across {len(docs)} document(s): {', '.join(docs)}. Grounded evidence layer ready."
@@ -351,28 +405,29 @@ EVIDENCE:
             "status": "completed",
             "sources": 0
         }]
-        return {"evidence": "", "critique": "No relevant evidence chunks found.", "trace": trace}
+        return {"evidence": evidence, "critique": "Ready for universal knowledge synthesis.", "trace": trace}
 
 def specialist_agent(state: AgentState) -> AgentState:
     if state.get("error"):
         return {"trace": state.get("trace", []) + [{"agent": "Specialist Agent", "status": "skipped", "reason": "upstream_error"}]}
     role = {
-        "qa": "Answer factual questions using only the evidence.",
-        "compare": "Compare the requested items and clearly separate evidence from unknowns.",
-        "summarize": "Produce a concise evidence-backed synthesis.",
+        "qa": "Answer questions comprehensively using document evidence, web intelligence, and domain knowledge.",
+        "compare": "Compare the requested items and clearly separate internal evidence from external facts.",
+        "summarize": "Produce a concise synthesis grounded in evidence and web intelligence.",
         "extract": "Extract requested facts into a structured list.",
-        "plan": "Build an implementation plan grounded in the evidence; mark assumptions.",
-        "code-review": "Review code-related evidence and flag concrete issues without inventing code.",
-    }.get(state.get("intent", "qa"), "Answer the user using the evidence.")
+        "plan": "Build a comprehensive implementation plan; mark assumptions.",
+        "code-review": "Review code-related inquiries and provide complete, functional code solutions.",
+    }.get(state.get("intent", "qa"), "Answer the user thoroughly using evidence and general knowledge.")
     prompt = f"""
-You are the Specialist Agent in a multi-agent RAG system.
+You are the Specialist Agent in NEXUS RAG OS, a universal AI operating system with hybrid document retrieval and live web intelligence.
 Role: {role}
 Guidelines:
-1. Ground every statement strictly in the provided evidence. Cite sources using individual citation brackets like [S1] or [S2] (e.g. 'achieves 34% reduction [S1] [S2]').
-2. Thoroughly address ALL parts and clauses of the user's query using the retrieved evidence.
-3. If the user asks for specific entities, metrics, components, projects, or findings, list them clearly with all available details (e.g. tech stack, percentages, dates, architecture).
-4. If official metrics, weightage, or rankings are not explicitly stated in the sources, provide the verified findings and explicitly clarify what is not stated.
-5. Format your output cleanly in structured Markdown with clear headings (###), bullet points (*), bold emphasis for key numbers/metrics, tables where appropriate, and crisp paragraphs.
+1. If the user's query refers to uploaded documents or internal evidence (marked with [S1], [S2]), ground your statements in that evidence and cite sources with [S1], [S2].
+2. If the user asks a general knowledge question, coding question, explanation, current topic, or question not found in the uploaded documents:
+   - Provide an authoritative, comprehensive, and helpful answer using your broad domain knowledge and web intelligence.
+   - Include code snippets with syntax highlighting, comparison tables, step-by-step explanations, and rich Markdown.
+3. If internal document evidence does NOT contain the answer, NEVER refuse or say "I don't have information." Instead, answer the question thoroughly using web intelligence and general knowledge, and politely clarify that the answer is based on web/general knowledge.
+4. Format your output cleanly in structured Markdown with clear headings (###), bullet points (*), bold emphasis for key numbers/metrics, tables where appropriate, and crisp paragraphs.
 
 Query:
 {state['query']}
@@ -414,14 +469,10 @@ def verifier_agent(state: AgentState) -> AgentState:
         }
     verification_prompt = f"""
 You are the Verifier Agent in a multi-agent RAG system.
-Review the draft response against the retrieved evidence.
-Check that all factual claims are accurately supported by the evidence and keep all citations like [S1], [S2].
-
-CRITICAL FORMATTING INSTRUCTIONS:
-- Preserve clean Markdown layout, including section headers (###), bullet points (*), bold text (**), tables, and blank lines between sections.
-- Do NOT merge paragraphs or collapse lists into a single continuous paragraph.
-- Ensure all source citations use individual brackets like [S1] or [S2] (not [S1, S2]).
-- If any statement is unsupported by the evidence, correct or remove it while keeping the structure intact.
+Review the draft response.
+- If internal document citations [S1], [S2] are present, verify that they accurately reflect the internal evidence and remove any invalid or hallucinated citations.
+- If the response is general knowledge, technical assistance, or web intelligence, preserve the full explanation, code blocks, tables, and structured Markdown layout.
+- Ensure clean Markdown layout with clear headings (###), bullet points (*), bold text (**), code blocks, and tables.
 Return the verified, beautifully formatted response.
 
 QUERY:
